@@ -792,10 +792,15 @@ end
 
 ARGV.each do |file|
   if File.file? file
+    handled = false
     $handlers.each do |handler|
       if handler.match? file
         send(handler, $command, file)
+        handled = true
       end
+    end
+    if not handled
+      unarchive File.new(file)
     end
   end
 end
