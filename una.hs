@@ -6,11 +6,11 @@ module Unarchiver where
 --
 -- by John Wiegley <johnw@newartisans.com>
 --
--- A simple universal unarchiving utility.  Just point it at any archive
--- or compressed file, and it spits out a single file or directory in
--- the current directory with its contents.  Use -d to delete the
--- original archive on success.  Use -f to overwrite any existing file
--- or directory which might be in the way.
+-- A simple universal unarchiving utility.  Just point it at any archive or
+-- compressed file, and it spits out a single file or directory in the current
+-- directory with its contents.  Use -d to delete the original archive on
+-- success.  Use -f to overwrite any existing file or directory which might be
+-- in the way.
 
 import Data.List
 import qualified Data.ByteString.Lazy as B
@@ -29,29 +29,26 @@ import qualified Control.Exception as C
 -- This script takes a series of pathnames to compressed files and/or
 -- archives, and uncompresses/unarchives them.
 --
--- What is useful about this script is that it guarantees that the
--- result of the unarchiving is a single new entry in the current
--- directory.  That is:
+-- What is useful about this script is that it guarantees that the result of
+-- the unarchiving is a single new entry in the current directory.  That is:
 --
---   1. If it's simply a compressed file, it uncompresses it in the
---      current directory.
---   2. If it's an archive containing a single file or directory, the
---      result is much the same as if it had been compressed: the file
---      or directory ends up in the current directory.
+--   1. If it's simply a compressed file, it uncompresses it in the current
+--      directory.
+--   2. If it's an archive containing a single file or directory, the result
+--      is much the same as if it had been compressed: the file or directory
+--      ends up in the current directory.
 --   3. If the archive contains multiple items, they are unarchived in a
 --      directory named after the original.
 --
--- If the -d flag is given, the original file is removed after a
---   successful unarchiving.
-
--- If the -f flag is given, any existing files in the current directory
---   will be overwritten.  Otherwise, an error is signaled.
+-- If the -d flag is given, the original file is removed after a successful
+--   unarchiving.
+-- If the -f flag is given, any existing files in the current directory will
+--   be overwritten.  Otherwise, an error is signaled.
 
 main :: IO ()
 main = do
   cmdArgs <- getArgs
   forM_ cmdArgs $ \path -> do
-    -- jww (2010-07-08): Need to convert path to an absolute path here
     cpath  <- canonicalizePath path
     result <- unarchive cpath
     case result of
@@ -64,9 +61,9 @@ main = do
 
 -- The variations of unarchive' receive a list of archive types yet to be
 -- "unwrapped" from the previous extraction, plus a cleanup action which must
--- be executed before the final result is returned.  The end result will be
--- that only the final extraction remains, as indicated by the return value,
--- while all temporaries have been properly cleaned up.
+-- be executed before the final result is returned.  The end result is that
+-- only the final extraction remains, indicated by the return value, with all
+-- temporaries having been properly cleaned up.
 
 unarchive :: FilePath -> IO Extraction
 unarchive path = do
@@ -100,9 +97,9 @@ unarchive path = do
                                      result <- unarchive' ts y
                                      m; return result
 
--- Every archive type known to this script is listed here.  They are
--- each handled by `unaCmd', below, which returns the command needed to
--- unarchive that type.
+-- Every archive type known to this script is listed here.  They are each
+-- handled by `unaCmd', below, which returns the command needed to unarchive
+-- that type.
 
 data ArchiveType = Compress     -- UNIX-style compress
                  | Gzip
@@ -111,13 +108,33 @@ data ArchiveType = Compress     -- UNIX-style compress
                  | Xzip
                  | Zip
                  | Tarball
-                 | Unknown
+                   -- jww (2010-07-08): Types to add:
+                   --  .UU         UUencode
+                   --  .ARJ        Arj
+                   --  .BIN        MacBinary
+                   --  .BXY        some old Binary II format
+                   --  .BNY        some old Binary II format
+                   --  .BQY        some old Binary II format
+                   --  .CAB        Windows CABinet files
+                   --  .cpio       CPIO
+                   --  .dmg        Apple Disk Image
+                   --  .HQX        BinHex?
+                   --  .ISO        CD-ROM ISO9660
+                   --  .LHA        LHarc
+                   --  .LZH        LHarc again
+                   --  .RAR        WinRAR
+                   --  .SDK        ShrinkIt disk
+                   --  .SEA        StuffIt Expander archive
+                   --  .SHK        ShrinkIt archive
+                   --  .SIT        StuffIt archive
+                   -- jww (2010-07-08): Make these case-insensitive
                  deriving Show
 
--- Determine which "type" an archive is by examining its extension.  It
--- may not even be an archive at all, but just a compressed file.  It
--- could even be a compressed archive containing just a single file!
--- There are too many possible combinations to know at this point.
+
+-- Determine which "type" an archive is by examining its extension.  It may
+-- not even be an archive at all, but just a compressed file.  It could even
+-- be a compressed archive containing just a single file!  There are too many
+-- possible combinations to know at this point.
 
 exts = [ (".tar", [Tarball])
        , (".taz", [Compress, Tarball])
@@ -147,6 +164,10 @@ archiveTypes = archiveTypes' []
 -- supports, the result may be one of several types, described by the type
 -- Extraction.
 
+noCleanup :: IO ()
+noCleanup = return ()
+
+
 data Extraction = DataStream B.ByteString
                 | FileName FilePath
                 | DirectoryName FilePath
@@ -158,10 +179,6 @@ extractArgs :: Extraction -> [String] -> ([String], B.ByteString)
 extractArgs (DataStream d) args = (args, d)
 extractArgs (FileName f) args   = (args ++ [f], B.empty)
 extractArgs _ _                 = error "Cannot extract a directory"
-
-
-noCleanup :: IO ()
-noCleanup = return ()
 
 
 extractStream :: String -> [String] -> Extraction -> IO (Extraction, IO ())
@@ -225,6 +242,7 @@ extractArchive cmd args inp = do
     then examineContents tmpDir
     else return (ArchiveError (Char8.unpack err), noCleanup)
 
+
 -- Examine the contents of the now-populated temp directory
 --   if it's a single file, return the name and a cleanup action to
 --     remove temp
@@ -245,6 +263,7 @@ examineContents dir = do
                            return (x, do removeDirectoryRecursive dir; m)
                    else return (FileName path, removeDirectoryRecursive dir)
     xs     -> return (DirectoryName dir, noCleanup)
+
 
 -- The following function was copied from System.Process, because I needed a
 -- variant which operates on lazy ByteStrings.  The regular version attempts
