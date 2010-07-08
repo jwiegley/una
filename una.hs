@@ -1,6 +1,6 @@
 #!/usr/bin/env runhaskell
 
-module Unarchiver where
+module Main where
 
 -- una.hs, version 1.0 (2010-07-02)
 --
@@ -275,7 +275,7 @@ bReadProcessWithExitCode
     -> B.ByteString               -- ^ standard input
     -> IO (ExitCode,B.ByteString,B.ByteString) -- ^ exitcode, stdout, stderr
 bReadProcessWithExitCode cmd args input = do
-    putStrLn $ "Executing: " ++ cmd ++ show args
+    -- putStrLn $ "Executing: " ++ cmd ++ show args
 
     (Just inh, Just outh, Just errh, pid) <-
         createProcess (proc cmd args){ std_in  = CreatePipe,
