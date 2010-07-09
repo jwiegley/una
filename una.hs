@@ -12,9 +12,8 @@ module Main where
 -- success.  Use -f to overwrite any existing file or directory which might be
 -- in the way.
 --
--- To handle all the supported format on Mac OS X, you must install:
+-- To handle all the supported formats on Mac OS X, you must first install:
 --   sudo port install cabextract unarj unrar lha p7zip
-
 
 import Data.Char
 import Data.List
@@ -35,21 +34,17 @@ import qualified Control.Exception as C
 -- This script takes a series of pathnames to compressed files and/or
 -- archives, and uncompresses/decodes/unarchives them.
 --
--- What is useful about this script is that it guarantees that the result of
--- the unarchiving is a single new entry in the current directory.  That is:
+-- What's especially useful about this script is that it guarantees that the
+-- result of this process is a single new entry in the current directory,
+-- whether that be a file or a directory.  That is:
 --
---   1. If it's simply a compressed file, it uncompresses it in the current
+--   1. If it's simply a compressed file, it uncompresses in the current
 --      directory.
 --   2. If it's an archive containing a single file or directory, the result
---      is much the same as if it had been compressed: the file or directory
+--      is the same as if it had been compressed: the file or directory
 --      ends up in the current directory.
 --   3. If the archive contains multiple items, they are unarchived in a
---      directory named after the original.
---
--- If the -d flag is given, the original file is removed after a successful
---   unarchiving.
--- If the -f flag is given, any existing files in the current directory will
---   be overwritten.  Otherwise, an error is signaled.
+--      directory named after the original file.
 
 main :: IO ()
 main = do
@@ -59,7 +54,8 @@ main = do
     result <- extract cpath False
     case result of
       ArchiveError err -> error err
-      _                -> return ()
+      _ -> return ()
+
       -- DEBUG:
       -- FileName f       -> do rf <- makeRelativeToCurrentDirectory f
       --                        putStrLn $ "-> file: " ++ rf
@@ -114,11 +110,11 @@ exts = [ (".tar",          [tarballExtractor])
        , (".bqy",          [shrinkItExtractor])
        ]
 
-returnStream :: B.ByteString -> IO ExtractionResult
-returnStream out = return (DataStream out, noCleanup)
-
 -- Gzip and family are very simple compressors that can handle streaming data
 -- quite easily.
+
+returnStream :: B.ByteString -> IO ExtractionResult
+returnStream out = return (DataStream out, noCleanup)
 
 simpleExtractor :: String -> [String] -> Extraction -> IO ExtractionResult
 simpleExtractor cmd args item =
