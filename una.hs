@@ -11,8 +11,14 @@ module Main where
 -- directory with its contents.  Use -d to delete the original archive on
 -- success.  Use -f to overwrite any existing file or directory which might be
 -- in the way.
+--
+-- To handle all the supported format on Mac OS X, you must install:
+--   sudo port install cabextract unarj unrar lha p7zip
 
+
+import Data.Char
 import Data.List
+import Data.Function
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as Char8
 import System.Environment
@@ -27,7 +33,7 @@ import Control.Concurrent.MonadIO
 import qualified Control.Exception as C
 
 -- This script takes a series of pathnames to compressed files and/or
--- archives, and uncompresses/unarchives them.
+-- archives, and uncompresses/decodes/unarchives them.
 --
 -- What is useful about this script is that it guarantees that the result of
 -- the unarchiving is a single new entry in the current directory.  That is:
@@ -50,123 +56,236 @@ main = do
   cmdArgs <- getArgs
   forM_ cmdArgs $ \path -> do
     cpath  <- canonicalizePath path
-    result <- unarchive cpath
+    result <- extract cpath False
     case result of
       ArchiveError err -> error err
-      FileName f       -> do rf <- makeRelativeToCurrentDirectory f
-                             putStrLn $ "Extracted single file: " ++ rf
-      DirectoryName f  -> do rf <- makeRelativeToCurrentDirectory f
-                             putStrLn $ "Extracted directory: " ++  rf
       _                -> return ()
-
--- The variations of unarchive' receive a list of archive types yet to be
--- "unwrapped" from the previous extraction, plus a cleanup action which must
--- be executed before the final result is returned.  The end result is that
--- only the final extraction remains, indicated by the return value, with all
--- temporaries having been properly cleaned up.
-
-unarchive :: FilePath -> IO Extraction
-unarchive path = do
-  fexists <- doesFileExist basename
-  dexists <- doesDirectoryExist basename
-  if fexists || dexists
-    then return $ ArchiveError $ "Destination already exists: " ++ basename
-    else unarchive' typs (FileName path,return ())
-
-  where (basename, typs) = archiveTypes path
-
-        -- If an error occurs at any stage of the process, short-circuit and
-        -- return, performing any cleanup along the way.
-        unarchive' _  (x@(ArchiveError _),m) = do m; return x
-
-        -- If we reach the final step of the unarchiving process, and the
-        -- result is a data stream, write it to disk at the desired basename.
-        unarchive' [] (x@(DataStream d),m) = do
-          B.writeFile basename d
-          m; return (FileName basename)
-
-        unarchive' [] (x@(FileName f),m) = do
-          when (f /= basename) $ renameFile f basename
-          m; return (FileName basename)
-
-        unarchive' [] (x@(DirectoryName f),m) = do
-          when (f /= basename) $ renameDirectory f basename
-          m; return (DirectoryName basename)
-
-        unarchive' (t:ts) (x,m) = do y <- extract t x
-                                     result <- unarchive' ts y
-                                     m; return result
-
--- Every archive type known to this script is listed here.  They are each
--- handled by `unaCmd', below, which returns the command needed to unarchive
--- that type.
-
-data ArchiveType = Compress     -- UNIX-style compress
-                 | Gzip
-                 | Bzip2
-                 | P7zip
-                 | Xzip
-                 | Zip
-                 | Tarball
-                   -- jww (2010-07-08): Types to add:
-                   --  .UU         UUencode
-                   --  .ARJ        Arj
-                   --  .BIN        MacBinary
-                   --  .BXY        some old Binary II format
-                   --  .BNY        some old Binary II format
-                   --  .BQY        some old Binary II format
-                   --  .CAB        Windows CABinet files
-                   --  .cpio       CPIO
-                   --  .dmg        Apple Disk Image
-                   --  .HQX        BinHex?
-                   --  .ISO        CD-ROM ISO9660
-                   --  .LHA        LHarc
-                   --  .LZH        LHarc again
-                   --  .RAR        WinRAR
-                   --  .SDK        ShrinkIt disk
-                   --  .SEA        StuffIt Expander archive
-                   --  .SHK        ShrinkIt archive
-                   --  .SIT        StuffIt archive
-                   -- jww (2010-07-08): Make these case-insensitive
-                 deriving Show
-
+      -- DEBUG:
+      -- FileName f       -> do rf <- makeRelativeToCurrentDirectory f
+      --                        putStrLn $ "-> file: " ++ rf
+      -- DirectoryName f  -> do rf <- makeRelativeToCurrentDirectory f
+      --                        putStrLn $ "-> dir: " ++  rf
 
 -- Determine which "type" an archive is by examining its extension.  It may
--- not even be an archive at all, but just a compressed file.  It could even
--- be a compressed archive containing just a single file!  There are too many
+-- not be an archive at all, but just a compressed file.  It could even be a
+-- compressed archive containing just a single file!  There are too many
 -- possible combinations to know at this point.
 
-exts = [ (".tar", [Tarball])
-       , (".taz", [Compress, Tarball])
-       , (".tgz", [Gzip, Tarball])
-       , (".tbz", [Bzip2, Tarball])
-       , (".tz2", [Bzip2, Tarball])
-       , (".txz", [Xzip, Tarball])
-       , (".z",   [Compress])
-       , (".gz",  [Gzip])
-       , (".bz2", [Bzip2])
-       , (".xz",  [Xzip])
-       , (".7z",  [P7zip])
-       , (".zip", [Zip])
-       , (".jar", [Zip])
+exts = [ (".tar",          [tarballExtractor])
+       , (".taz",          [compressExtractor, tarballExtractor])
+       , (".tgz",          [gzipExtractor, tarballExtractor])
+       , (".tbz",          [bzip2Extractor, tarballExtractor])
+       , (".tz2",          [bzip2Extractor, tarballExtractor])
+       , (".txz",          [xzipExtractor, tarballExtractor])
+       , (".z",            [compressExtractor])
+       , (".gz",           [gzipExtractor])
+       , (".bz2",          [bzip2Extractor])
+       , (".xz",           [xzipExtractor])
+       , (".7z",           [p7zipExtractor])
+       , (".zip",          [zipExtractor])
+       , (".jar",          [zipExtractor])
+       , (".arj",          [arjExtractor])
+       , (".lha",          [lhaExtractor])
+       , (".lzh",          [lhaExtractor])
+       , (".rar",          [rarExtractor])
+       , (".uu",           [uuExtractor])
+       , (".ar",           [arExtractor])
+       , (".cab",          [cabExtractor])
+       , (".cpio",         [cpioExtractor])
+
+       -- , (".gpg",          [gpgExtractor])
+       -- , (".asc",          [gpgExtractor])
+
+       , (".dmg",          [diskImageExtractor])
+       , (".iso",          [diskImageExtractor])
+       , (".cdr",          [diskImageExtractor])
+       , (".sparseimage",  [diskImageExtractor])
+       , (".sparsebundle", [diskImageExtractor])
+
+       , (".sit",          [stuffItExtractor True])
+       , (".sea",          [stuffItExtractor True])
+       , (".bin",          [stuffItExtractor False])
+       , (".hqx",          [stuffItExtractor False])
+
+       , (".sdk",          [shrinkItExtractor])
+       , (".shk",          [shrinkItExtractor])
+       , (".bxy",          [shrinkItExtractor])
+       , (".bny",          [shrinkItExtractor])
+       , (".bqy",          [shrinkItExtractor])
        ]
 
-archiveTypes' :: [ArchiveType] -> FilePath -> (FilePath, [ArchiveType])
-archiveTypes' acc f = apply $ lookup (takeExtension f) exts
-  where apply (Just types) = archiveTypes' (acc ++ types) (dropExtension f)
-        apply Nothing      = (f, acc)
+returnStream :: B.ByteString -> IO ExtractionResult
+returnStream out = return (DataStream out, noCleanup)
 
-archiveTypes :: FilePath -> (FilePath, [ArchiveType])
-archiveTypes = archiveTypes' []
+-- Gzip and family are very simple compressors that can handle streaming data
+-- quite easily.
 
--- Given an archive path and its type, extract its contents.  Depending on the
--- type of archive, and what command-line options the unarchiver command
--- supports, the result may be one of several types, described by the type
--- Extraction.
+simpleExtractor :: String -> [String] -> Extraction -> IO ExtractionResult
+simpleExtractor cmd args item =
+  case item of
+    DataStream d -> performExtract cmd args d returnStream
+    FileName f   -> performExtract cmd (args ++ [f]) B.empty returnStream
+    
+gzipExtractor     = Extractor $ simpleExtractor "gzip" ["-qdc"]
+compressExtractor = gzipExtractor
+bzip2Extractor    = Extractor $ simpleExtractor "bzip2" ["-qdc"]
+xzipExtractor     = Extractor $ simpleExtractor "xz" ["-qdc"]
 
-noCleanup :: IO ()
-noCleanup = return ()
+uuExtractor       = Extractor $ simpleExtractor "uudecode" []
+-- gpgExtractor      = Extractor $ simpleExtractor "gpg" ["-d"]
 
+-- Tarballs and 7-zip are both archive formats that can accept their input on
+-- stdin.  It's not likely that someone will compress a 7zip archive, but it's
+-- handled anyway.
+
+returnContents :: FilePath -> B.ByteString -> IO ExtractionResult
+returnContents dir _ = examineContents dir True
+
+tarballExtractor = Extractor $ \item -> do
+  dir <- createTempDirectory
+  case item of
+    DataStream d ->
+      performExtract "tar" ["xCf", dir, "-"] d (returnContents dir)
+    FileName f   ->
+      performExtract "tar" ["xCf", dir, f] B.empty (returnContents dir)
+
+p7zipExtractor = Extractor $ \item -> do
+  dir <- createTempDirectory
+  case item of
+    DataStream d ->
+      performExtract "7za" ["x", "-bd", "-o" ++ dir, "-si"] d
+                     (returnContents dir)
+    FileName f   ->
+      performExtract "7za" ["x", f, "-bd", "-o" ++ dir] B.empty
+                     (returnContents dir)
+                     
+-- Zip and CAB are not quite as flexible as tar and 7-zip, in that they cannot
+-- accept the archive via stdin.  If there is a stream from an earlier
+-- decoding, it must be written to a temp file and then extracted from that.
+
+zipExtractor = Extractor $ fix $ \fn item ->
+  case item of
+    DataStream d -> extractByTemp d fn
+    FileName f   -> do
+      dir <- createTempDirectory
+      performExtract "unzip" ["-q", "-d", dir, f] B.empty (returnContents dir)
+
+cabExtractor = Extractor $ fix $ \fn item ->
+  case item of
+    DataStream d -> extractByTemp d fn
+    FileName f   -> do
+      dir <- createTempDirectory
+      performExtract "cabextract" ["-q", "-d", dir, f] B.empty
+                     (returnContents dir)
+                     
+-- cpio doesn't know how to extract its contents to a particular directory, so
+-- a temporary must be created.  It can, however, read input from stream.
+
+extractInTempDir :: String -> [String] -> B.ByteString -> IO ExtractionResult
+extractInTempDir cmd args inp = do
+  dir <- createTempDirectory
+  cdir <- canonicalizePath dir
+  cwd <- getCurrentDirectory
+  ccwd <- canonicalizePath cwd
+  C.bracket (setCurrentDirectory cdir)
+            (\_ -> setCurrentDirectory ccwd)
+            (\_ -> performExtract cmd args inp (returnContents cdir))
+
+cpioExtractor = Extractor $ fix $ \fn item ->
+  case item of
+    DataStream d -> extractInTempDir "cpio" ["-id"] d
+    FileName f   -> extractInTempDir "cpio" ["-idF", f] B.empty
+
+-- The next set of formats can't handle streaming input, nor can they extract
+-- to a specified directory.  This is why I call them the "dumb" extractors.
+-- Everything must be setup for them in advance.
+
+dumbExtractor :: String -> String -> Extraction -> IO ExtractionResult
+dumbExtractor cmd arg item =
+  case item of
+    DataStream d -> extractByTemp d (dumbExtractor cmd arg)
+    FileName f   -> extractInTempDir cmd [arg, f] B.empty
+
+arjExtractor      = Extractor $ dumbExtractor "unarj" "x"
+lhaExtractor      = Extractor $ dumbExtractor "lha" "x"
+rarExtractor      = Extractor $ dumbExtractor "unrar" "x"
+arExtractor       = Extractor $ dumbExtractor "ar" "x"
+shrinkItExtractor = Extractor $ dumbExtractor "nulib2" "-x"
+
+-- Disk images are mountable archives, which means the data must be copied out
+-- in order to "extract" it.  jww (2010-07-09): We should handle Linux
+-- loopbook mounts too.
+
+diskImageExtractor = Extractor $ fix $ \fn item ->
+  case item of
+    DataStream d -> extractByTemp d fn
+    FileName f   -> do
+      let args = ["attach", "-readonly", "-mountrandom", "/tmp",
+                  "-noverify", "-noautofsck", f]
+      -- DEBUG:
+      -- putStrLn $ "hdiutil " ++ unwords args
+      (exit, out, _) <- readProcessWithExitCode "hdiutil" args []
+      case exit of
+        ExitFailure _ ->
+          return (ArchiveError "Failed to attach disk image", noCleanup)
+
+        ExitSuccess -> do
+          let mountPoint =
+                case find (isInfixOf "/tmp/dmg") (lines out) of
+                  Just line -> (Just . last . words) line
+                  Nothing   -> Nothing
+          case mountPoint of
+            Nothing -> return (ArchiveError "Failed to attach disk image",
+                               noCleanup)
+            Just dir -> do
+              tmpDir <- createTempDirectory
+              -- DEBUG:
+              -- putStrLn $ "ditto " ++ unwords [dir, tmpDir]
+              readProcessWithExitCode "ditto" [dir, tmpDir] []
+              -- DEBUG:
+              -- putStrLn $ "hdiutil " ++ unwords ["detach", dir, "-force"]
+              readProcessWithExitCode "hdiutil" ["detach", dir, "-force"] []
+              examineContents tmpDir True
+              
+-- StuffIt Expander is its own creature.  We talk to it via Applescript, as I
+-- know of no better way.
+
+stuffItExtractor archivep = Extractor $ fix $ \fn item ->
+  case item of
+    DataStream d -> extractByTemp d fn
+    FileName f   -> do
+      tmpDir <- createTempDirectory
+      canonTmp <- canonicalizePath tmpDir
+
+      let script =    "  tell application \"StuffIt Expander\"\n"
+                   ++ "    run\n"
+                   ++ "    expand {POSIX file \"" ++ f ++ "\"}"
+                   -- ++ " with delete originals"
+                   ++ " to POSIX file \"" ++ canonTmp ++ "\"\n"
+                   ++ "  end tell"
+
+      -- DEBUG:
+      -- putStrLn "! invoking StuffIt Expander"
+
+      (exit, _, err) <- readProcessWithExitCode "osascript" [] script
+      case exit of
+        ExitSuccess   ->
+          if archivep
+          then examineContents canonTmp True
+          else do contents <- getDirectoryContents canonTmp
+                  let elems = delete "." $ delete ".." contents
+                      file  = C.assert (length elems == 1)
+                                       (canonTmp </> head elems)
+                  exists <- doesFileExist file
+                  return (FileName $ C.assert exists file,
+                          removeDirectoryRecursive canonTmp)
+        ExitFailure _ -> return (ArchiveError $
+                                 "Failed to invoke StuffIt Expander: " ++ err,
+                                 removeDirectoryRecursive canonTmp)
+
+-- Types used by this script.
+
+data Extractor = Extractor { extractor :: Extraction -> IO ExtractionResult }
 
 data Extraction = DataStream B.ByteString
                 | FileName FilePath
@@ -174,95 +293,129 @@ data Extraction = DataStream B.ByteString
                 | ArchiveError String
                 deriving (Show)
 
+type ExtractionResult = (Extraction, IO ())
 
-extractArgs :: Extraction -> [String] -> ([String], B.ByteString)
-extractArgs (DataStream d) args = (args, d)
-extractArgs (FileName f) args   = (args ++ [f], B.empty)
-extractArgs _ _                 = error "Cannot extract a directory"
+noCleanup :: IO ()
+noCleanup = return ()
 
 
-extractStream :: String -> [String] -> Extraction -> IO (Extraction, IO ())
-extractStream cmd args x = do
-  (exit, out, err) <- uncurry (bReadProcessWithExitCode cmd)
-                              (extractArgs x args)
+-- Given a file path, determine its type and extract its contents.  Depending
+-- on the type of the file, and what command-line options the extraction
+-- command supports, the result may be one of several types, described by the
+-- type Extraction.
+
+extract :: FilePath -> Bool -> IO Extraction
+extract path overwrite = do
+  fexists <- doesFileExist basename
+  dexists <- doesDirectoryExist basename
+  when (fexists || dexists) $
+    if overwrite
+    then if fexists
+         then removeFile basename
+         else removeDirectoryRecursive basename
+    else unless (null typs) $
+         error $ "Destination already exists: " ++ basename
+
+  extract' typs (FileName path,return ())
+
+  where (basename, typs) = findExtractors [] path
+
+        -- The variations of extract' receive a list of archive types yet to
+        -- be "unwrapped" from the previous extraction, plus a cleanup action
+        -- which must be executed before the final result is returned.  The
+        -- end result is that only the final extraction remains, indicated by
+        -- the return value, with all temporaries having been properly cleaned
+        -- up.
+
+        extract' _  (x@(ArchiveError _),m) = do m; return x
+
+        extract' [] (x@(DataStream d),m) = do
+          -- If we reach the final step of the unarchiving process, and
+          -- the result is a data stream, write it to disk at the
+          -- desired basename.
+          B.writeFile basename d
+          m; return (FileName basename)
+
+        extract' [] (x@(FileName f),m) = do
+          renameFile f basename
+          m; return (FileName basename)
+
+        extract' [] (x@(DirectoryName f),m) = do
+          renameDirectory f basename
+          m; return (DirectoryName basename)
+
+        extract' (t:ts) (x,m) = do y <- extractor t x
+                                   result <- extract' ts y
+                                   m; return result
+
+
+findExtractors :: [Extractor] -> FilePath -> (FilePath, [Extractor])
+findExtractors acc f = apply $ lookup (map toLower (takeExtension f)) exts
+  where apply (Just types) = findExtractors (acc ++ types) (dropExtension f)
+        apply Nothing      = (f, acc)
+
+
+performExtract :: String        -- command to execute
+                  -> [String]   -- command arguments
+                  -> B.ByteString -- standard input
+                  -> (B.ByteString -> IO ExtractionResult)
+                                -- function to process output
+                  -> IO ExtractionResult
+performExtract cmd args ds fn = do
+  (exit, out, err) <- bReadProcessWithExitCode cmd args ds
   if exit == ExitSuccess
-    then return (DataStream out, noCleanup)
-    else return (ArchiveError (Char8.unpack err), noCleanup)
+    then fn out
+    else return (ArchiveError err, noCleanup)
 
 
-extract :: ArchiveType -> Extraction -> IO (Extraction, IO ())
-extract Compress = extractStream "gzip" ["-dc"]
-extract Gzip     = extract Compress
-extract Bzip2    = extractStream "bzip2" ["-dc"]
-extract Xzip     = extractStream "xz" ["-dc"]
-extract Tarball  = extractTarball
-extract P7zip    = extractP7zip
-extract Zip      = extractZip
-extract _        = \x -> return (ArchiveError "Unrecognized archive type", noCleanup)
+examineContents :: FilePath -> Bool -> IO ExtractionResult
+examineContents dir cleanup = do
+  -- Examine the contents of a populated directory
+  --  if it's a single file, return the name and a cleanup action to
+  --    remove temp
+  --  if it's a single directory, recurse this step
+  --  if it's many files and/or directories, return the name of the temp
+  --    directory, and no cleanup action
+  canon <- canonicalizePath dir
+  contents <- getDirectoryContents canon
+  case delete "." $ delete ".." contents of
+    [] -> return (ArchiveError "Empty archive", removeDirectoryRecursive canon)
+
+    (x:[]) -> do
+      let path = canon </> x
+      isDir <- doesDirectoryExist path
+      if isDir
+        then do (x,m) <- examineContents path False
+                return (x, do when cleanup $ removeDirectoryRecursive canon; m)
+        else do x <- extract path False
+                return (x, when cleanup $ removeDirectoryRecursive canon)
+
+    xs     -> return (DirectoryName canon, noCleanup)
 
 
-extractTarball :: Extraction -> IO (Extraction, IO ())
-extractTarball (DataStream d) = extractArchive "tar" ["xCf", "$DIR", "-"] d
-extractTarball (FileName f)   = extractArchive "tar" ["xCf", "$DIR", f] B.empty
-
-extractP7zip :: Extraction -> IO (Extraction, IO ())
-extractP7zip (DataStream d) = extractArchive "7za" ["x", "-o$DIR", "-si"] d
-extractP7zip (FileName f)   = extractArchive "7za" ["x", f, "-o$DIR"] B.empty
-
-extractZip :: Extraction -> IO (Extraction, IO ())
-extractZip (DataStream d) = do
-  (path, handle) <- openBinaryTempFile "." ".file.zip"
-  B.hPut handle d
+extractByTemp :: B.ByteString   -- output to write to temp
+                 -> (Extraction -> IO ExtractionResult)
+                                -- function to handle the new temp file
+                 -> IO ExtractionResult
+extractByTemp ds fn = do
+  (path, handle) <- openBinaryTempFile "." "file.ar"
+  -- DEBUG:
+  -- putStrLn $ "> " ++ path
+  B.hPut handle ds
   hFlush handle
   -- unzip does not support reading from standard input, so we must write the
   -- data out to a temporary file in order to continue.
-  (x,m) <- extractZip (FileName path)
+  (x,m) <- fn (FileName path)
   hClose handle
   return (x, do removeFile path; m)
-extractZip (FileName f) = extractArchive "unzip" ["-d", "$DIR", f] B.empty
 
-
-replace :: (Eq a) => [a] -> [a] -> [a] -> [a]
-replace _ _ [] = []
-replace old new xs@(y:ys) =
-  case stripPrefix old xs of
-    Nothing -> y : replace old new ys
-    Just ys' -> new ++ replace old new ys'
-
-extractArchive :: String -> [String] -> B.ByteString -> IO (Extraction, IO ())
-extractArchive cmd args inp = do
-  -- jww (2010-07-08): Create a real temporary name here
-  tmpDir <- return "tmpdir"
-  -- Make a temporary directory within the current dir
-  createDirectory tmpDir
-  -- Extract the contents of the archive into that directory
-  (exit, out, err) <- let args' = map (replace "$DIR" tmpDir) args
-                      in bReadProcessWithExitCode cmd args' inp
-  if exit == ExitSuccess
-    then examineContents tmpDir
-    else return (ArchiveError (Char8.unpack err), noCleanup)
-
-
--- Examine the contents of the now-populated temp directory
---   if it's a single file, return the name and a cleanup action to
---     remove temp
---   if it's a single directory, recurse this step
---   if it's many files and/or directories, return the name of the temp
---     directory, and no cleanup action
-
-examineContents :: FilePath ->  IO (Extraction, IO ())
-examineContents dir = do
-  contents <- getDirectoryContents dir
-  case delete "." $ delete ".." contents of
-    []     -> return (ArchiveError "Archive was empty", 
-                      removeDirectoryRecursive dir)
-    (x:[]) -> do let path = dir </> x
-                 isDir <- doesDirectoryExist path
-                 if isDir
-                   then do (x,m) <- examineContents path
-                           return (x, do removeDirectoryRecursive dir; m)
-                   else return (FileName path, removeDirectoryRecursive dir)
-    xs     -> return (DirectoryName dir, noCleanup)
+createTempDirectory :: IO FilePath
+createTempDirectory = do
+  (path, handle) <- openBinaryTempFile "." "dir.tmp"
+  hClose handle
+  removeFile path
+  createDirectory path
+  return path
 
 
 -- The following function was copied from System.Process, because I needed a
@@ -273,10 +426,8 @@ bReadProcessWithExitCode
     :: FilePath                 -- ^ command to run
     -> [String]                 -- ^ any arguments
     -> B.ByteString               -- ^ standard input
-    -> IO (ExitCode,B.ByteString,B.ByteString) -- ^ exitcode, stdout, stderr
+    -> IO (ExitCode,B.ByteString,String) -- ^ exitcode, stdout, stderr
 bReadProcessWithExitCode cmd args input = do
-    -- putStrLn $ "Executing: " ++ cmd ++ show args
-
     (Just inh, Just outh, Just errh, pid) <-
         createProcess (proc cmd args){ std_in  = CreatePipe,
                                        std_out = CreatePipe,
@@ -286,15 +437,19 @@ bReadProcessWithExitCode cmd args input = do
 
     -- fork off a thread to start consuming stdout
     out  <- B.hGetContents outh
-
     _ <- forkIO $ C.evaluate (B.length out) >> putMVar outMVar ()
 
     -- fork off a thread to start consuming stderr
-    err  <- B.hGetContents errh
-    _ <- forkIO $ C.evaluate (B.length err) >> putMVar outMVar ()
+    err  <- hGetContents errh
+    _ <- forkIO $ C.evaluate (length err) >> putMVar outMVar ()
 
     -- now write and flush any input
     unless (B.null input) $ do B.hPutStr inh input; hFlush inh
+    -- DEBUG:
+    -- if B.null input
+    --   then putStrLn $ cmd ++ " " ++ unwords args
+    --   else do putStrLn $ "| " ++ cmd ++ " " ++ unwords args
+    --           B.hPutStr inh input; hFlush inh
     hClose inh -- done with stdin
 
     -- wait on the output
