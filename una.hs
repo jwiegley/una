@@ -28,6 +28,7 @@ import System.FilePath
 import System.Process
 import System.Directory
 import System.IO
+import System.IO.Storage
 import System.Exit
 import Control.Monad
 import Control.Concurrent.MonadIO
@@ -53,14 +54,23 @@ copyright = "2009-2010"
 
 data Una = Una
     { delete_   :: Bool
-    , overwrite :: Bool
+    , force     :: Bool
+    , temp      :: FilePath
+    , output    :: FilePath
+    , sys_temp  :: Bool
     , files     :: [FilePath]
     }
     deriving (Data, Typeable, Show, Eq)
 
 una = mode $ Una
     { delete_   = def &= text "Delete the original archive if successful"
-    , overwrite = def &= flag "f" & text "Overwrite any existing file/dir"
+    , force     = def &= flag "f" & text "Overwrite any existing file/dir"
+    , temp      = def &= typDir & 
+                  text "Use DIR as a temp directory, instead of current"
+    , output    = def &= typDir & flag "o" & 
+                  text "Unarchive to DIR instead of the current directory"
+    , sys_temp  = def &= flag "T" & 
+                  text "Use the system's temp directory (typically /tmp)"
     , files     = def &= args & typ "FILE..."
     } &=
     prog "una" &
@@ -79,23 +89,28 @@ main = do
   -- which case nothing has been done.  If an error occurs for a given
   -- archive, stop then.
   forM_ (files opts) $ \path -> do
-    result <- extract path (overwrite opts)
+    result <- withStore "main" $ do putValue "main" "opts" opts
+                                    extract path (force opts)
     case result of
       ArchiveError err -> error err
       FileName fp      -> if fp /= path
-                          then success fp "file" (delete_ opts)
-                          else putStrLn $ "Unknown archive type: " ++ fp
-      DirectoryName dp -> success dp "directory" (delete_ opts)
+                          then success path fp "file" (delete_ opts)
+                          else putStrLn $ "Archive unrecognized: " ++ fp
+      DirectoryName dp -> success path dp "directory" (delete_ opts)
                              
   -- In case of success, print the final product's path if -v was used; and
   -- delete the original archive if -d was used.  Otherwise, this is a no-op.
-  where success f kind delete = do 
-          loud <- isLoud
-          when loud $ do
-            rf <- makeRelativeToCurrentDirectory f
-            putStrLn $ "-> " ++ kind ++ ": " ++ rf
-          when delete $ removeFile f
+  where success path f kind delete = do 
+          rf <- makeRelativeToCurrentDirectory f
+          putStrLn $ "Extracted " ++ kind ++ ": " ++ rf
+          when delete $ removeFile path
 
+
+getOption :: Data a => (a -> b) -> IO b
+getOption opt = do
+  opts <- getValue "main" "opts"
+  case opts of
+    Just o -> return $ opt o
 
 -- Determine which "type" an archive is by examining its extension.  It may
 -- not be an archive at all, but just a compressed file.  It could even be a
@@ -255,7 +270,7 @@ diskImageExtractor = Extractor $ fix $ \fn item ->
                   "-noverify", "-noautofsck", f]
 
       loud <- isLoud
-      when loud $ putStrLn $ "hdiutil " ++ unwords args
+      when loud $ putStrLn $ "! hdiutil " ++ unwords args
 
       (exit, out, _) <- readProcessWithExitCode "hdiutil" args []
       case exit of
@@ -273,10 +288,10 @@ diskImageExtractor = Extractor $ fix $ \fn item ->
             Just dir -> do
               tmpDir <- createTempDirectory
               when loud $ 
-                putStrLn $ "ditto " ++ unwords [dir, tmpDir]
+                putStrLn $ "! ditto " ++ unwords [dir, tmpDir]
               readProcessWithExitCode "ditto" [dir, tmpDir] []
               when loud $ 
-                putStrLn $ "hdiutil " ++ unwords ["detach", dir, "-force"]
+                putStrLn $ "! hdiutil " ++ unwords ["detach", dir, "-force"]
               readProcessWithExitCode "hdiutil" ["detach", dir, "-force"] []
               examineContents tmpDir True
               
@@ -298,7 +313,7 @@ stuffItExtractor archivep = Extractor $ fix $ \fn item ->
                    ++ "  end tell"
 
       loud <- isLoud
-      when loud $ putStrLn "! invoking StuffIt Expander"
+      when loud $ putStrLn "! invoke StuffIt Expander"
 
       (exit, _, err) <- readProcessWithExitCode "osascript" [] script
       case exit of
@@ -342,21 +357,29 @@ extract rpath overwrite = do
   path    <- canonicalizePath rpath
   pexists <- doesFileExist path
   unless pexists $ error $ "File does not exist: " ++ path
+  
+  destination <- getDestination
 
-  fexists <- doesFileExist basename
-  dexists <- doesDirectoryExist basename
+  fexists <- doesFileExist destination
+  dexists <- doesDirectoryExist destination
   when (fexists || dexists) $
     if overwrite
     then if fexists
-         then removeFile basename
-         else removeDirectoryRecursive basename
+         then removeFile destination
+         else removeDirectoryRecursive destination
     else unless (null typs) $
-         error $ "Destination already exists: " ++ basename
+         error $ "Destination already exists: " ++ destination
 
   extract' typs (FileName path,return ())
 
   where (basename, typs) = findExtractors [] rpath
-
+        
+        getDestination = do 
+          destpath <- getOption output
+          return $ if null destpath
+                   then basename
+                   else destpath </> takeFileName basename
+        
         -- The variations of extract' receive a list of archive types yet to
         -- be "unwrapped" from the previous extraction, plus a cleanup action
         -- which must be executed before the final result is returned.  The
@@ -370,16 +393,19 @@ extract rpath overwrite = do
           -- If we reach the final step of the unarchiving process, and
           -- the result is a data stream, write it to disk at the
           -- desired basename.
-          B.writeFile basename d
-          m; return (FileName basename)
+          destination <- getDestination
+          B.writeFile destination d
+          m; return (FileName destination)
 
         extract' [] (x@(FileName f),m) = do
-          renameFile f basename
-          m; return (FileName basename)
+          destination <- getDestination
+          renameFile f destination
+          m; return (FileName destination)
 
         extract' [] (x@(DirectoryName f),m) = do
-          renameDirectory f basename
-          m; return (DirectoryName basename)
+          destination <- getDestination
+          renameDirectory f destination
+          m; return (DirectoryName destination)
 
         extract' (t:ts) (x,m) = do y <- extractor t x
                                    result <- extract' ts y
@@ -435,7 +461,8 @@ extractByTemp :: B.ByteString   -- output to write to temp
                                 -- function to handle the new temp file
                  -> IO ExtractionResult
 extractByTemp ds fn = do
-  (path, handle) <- openBinaryTempFile "." "file.ar"
+  dir <- workingDirectory
+  (path, handle) <- openBinaryTempFile dir "file.ar"
 
   loud <- isLoud
   when loud $ putStrLn $ "> " ++ path
@@ -450,12 +477,22 @@ extractByTemp ds fn = do
 
 createTempDirectory :: IO FilePath
 createTempDirectory = do
-  (path, handle) <- openBinaryTempFile "." "dir.tmp"
+  dir <- workingDirectory
+  (path, handle) <- openBinaryTempFile dir "dir.tmp"
   hClose handle
   removeFile path
   createDirectory path
   return path
 
+workingDirectory :: IO FilePath
+workingDirectory = do
+  sysp <- getOption sys_temp
+  if sysp
+    then getTemporaryDirectory
+    else do dir <- getOption temp
+            if null dir
+              then return "."
+              else return dir
 
 -- The following function was copied from System.Process, because I needed a
 -- variant which operates on lazy ByteStrings.  The regular version attempts
@@ -488,7 +525,7 @@ bReadProcessWithExitCode cmd args input = do
     loud <- isLoud
     if loud
       then if B.null input
-           then putStrLn $ cmd ++ " " ++ unwords args
+           then putStrLn $ "! " ++ cmd ++ " " ++ unwords args
            else do putStrLn $ "| " ++ cmd ++ " " ++ unwords args
                    B.hPutStr inh input; hFlush inh
       else unless (B.null input) $ do B.hPutStr inh input; hFlush inh
