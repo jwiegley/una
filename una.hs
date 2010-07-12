@@ -1,8 +1,10 @@
 #!/usr/bin/env runhaskell
 
+{-# LANGUAGE DeriveDataTypeable #-}
+
 module Main where
 
--- una.hs, version 1.0 (2010-07-02)
+-- una.hs, version 2.0 (2010-07-02)
 --
 -- by John Wiegley <johnw@newartisans.com>
 --
@@ -21,7 +23,7 @@ import Data.Function
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as Char8
 import System.Environment
-import System.Console.GetOpt
+import System.Console.CmdArgs
 import System.FilePath
 import System.Process
 import System.Directory
@@ -46,21 +48,52 @@ import qualified Control.Exception as C
 --   3. If the archive contains multiple items, they are unarchived in a
 --      directory named after the original file.
 
+version   = "2.0.0"
+copyright = "2009-2010"
+
+data Una = Una
+    { delete_   :: Bool
+    , overwrite :: Bool
+    , files     :: [FilePath]
+    }
+    deriving (Data, Typeable, Show, Eq)
+
+una = mode $ Una
+    { delete_   = def &= text "Delete the original archive if successful"
+    , overwrite = def &= flag "f" & text "Overwrite any existing file/dir"
+    , files     = def &= args & typ "FILE..."
+    } &=
+    prog "una" &
+    text "Universal, recursive unarchiver/decoder/decompressor tool"
+
+
 main :: IO ()
 main = do
-  cmdArgs <- getArgs
-  forM_ cmdArgs $ \path -> do
-    cpath  <- canonicalizePath path
-    result <- extract cpath False
+  opts <- cmdArgs ("una v" ++ version 
+                   ++ ", (C) John Wiegley " ++ copyright) [una]
+
+  -- Extract each archive given on the command-line.  If it's not recognizable
+  -- as an archive, the resulting pathname will be identical to the input, in
+  -- which case nothing has been done.  If an error occurs for a given
+  -- archive, stop then.
+  forM_ (files opts) $ \path -> do
+    result <- extract path (overwrite opts)
     case result of
       ArchiveError err -> error err
-      _ -> return ()
+      FileName fp      -> if fp /= path
+                          then success fp "file" (delete_ opts)
+                          else putStrLn $ "Unknown archive type: " ++ fp
+      DirectoryName dp -> success dp "directory" (delete_ opts)
+                             
+  -- In case of success, print the final product's path if -v was used; and
+  -- delete the original archive if -d was used.  Otherwise, this is a no-op.
+  where success f kind delete = do 
+          loud <- isLoud
+          when loud $ do
+            rf <- makeRelativeToCurrentDirectory f
+            putStrLn $ "-> " ++ kind ++ ": " ++ rf
+          when delete $ removeFile f
 
-      -- DEBUG:
-      -- FileName f       -> do rf <- makeRelativeToCurrentDirectory f
-      --                        putStrLn $ "-> file: " ++ rf
-      -- DirectoryName f  -> do rf <- makeRelativeToCurrentDirectory f
-      --                        putStrLn $ "-> dir: " ++  rf
 
 -- Determine which "type" an archive is by examining its extension.  It may
 -- not be an archive at all, but just a compressed file.  It could even be a
@@ -89,8 +122,8 @@ exts = [ (".tar",          [tarballExtractor])
        , (".cab",          [cabExtractor])
        , (".cpio",         [cpioExtractor])
 
-       -- , (".gpg",          [gpgExtractor])
-       -- , (".asc",          [gpgExtractor])
+       , (".gpg",          [gpgExtractor])
+       , (".asc",          [gpgExtractor])
 
        , (".dmg",          [diskImageExtractor])
        , (".iso",          [diskImageExtractor])
@@ -128,7 +161,7 @@ bzip2Extractor    = Extractor $ simpleExtractor "bzip2" ["-qdc"]
 xzipExtractor     = Extractor $ simpleExtractor "xz" ["-qdc"]
 
 uuExtractor       = Extractor $ simpleExtractor "uudecode" []
--- gpgExtractor      = Extractor $ simpleExtractor "gpg" ["-d"]
+gpgExtractor      = Extractor $ simpleExtractor "gpg" ["-d"]
 
 -- Tarballs and 7-zip are both archive formats that can accept their input on
 -- stdin.  It's not likely that someone will compress a 7zip archive, but it's
@@ -218,8 +251,10 @@ diskImageExtractor = Extractor $ fix $ \fn item ->
     FileName f   -> do
       let args = ["attach", "-readonly", "-mountrandom", "/tmp",
                   "-noverify", "-noautofsck", f]
-      -- DEBUG:
-      -- putStrLn $ "hdiutil " ++ unwords args
+
+      loud <- isLoud
+      when loud $ putStrLn $ "hdiutil " ++ unwords args
+
       (exit, out, _) <- readProcessWithExitCode "hdiutil" args []
       case exit of
         ExitFailure _ ->
@@ -235,11 +270,11 @@ diskImageExtractor = Extractor $ fix $ \fn item ->
                                noCleanup)
             Just dir -> do
               tmpDir <- createTempDirectory
-              -- DEBUG:
-              -- putStrLn $ "ditto " ++ unwords [dir, tmpDir]
+              when loud $ 
+                putStrLn $ "ditto " ++ unwords [dir, tmpDir]
               readProcessWithExitCode "ditto" [dir, tmpDir] []
-              -- DEBUG:
-              -- putStrLn $ "hdiutil " ++ unwords ["detach", dir, "-force"]
+              when loud $ 
+                putStrLn $ "hdiutil " ++ unwords ["detach", dir, "-force"]
               readProcessWithExitCode "hdiutil" ["detach", dir, "-force"] []
               examineContents tmpDir True
               
@@ -260,8 +295,8 @@ stuffItExtractor archivep = Extractor $ fix $ \fn item ->
                    ++ " to POSIX file \"" ++ canonTmp ++ "\"\n"
                    ++ "  end tell"
 
-      -- DEBUG:
-      -- putStrLn "! invoking StuffIt Expander"
+      loud <- isLoud
+      when loud $ putStrLn "! invoking StuffIt Expander"
 
       (exit, _, err) <- readProcessWithExitCode "osascript" [] script
       case exit of
@@ -301,7 +336,11 @@ noCleanup = return ()
 -- type Extraction.
 
 extract :: FilePath -> Bool -> IO Extraction
-extract path overwrite = do
+extract rpath overwrite = do
+  path    <- canonicalizePath rpath
+  pexists <- doesFileExist path
+  unless pexists $ error $ "File does not exist: " ++ path
+
   fexists <- doesFileExist basename
   dexists <- doesDirectoryExist basename
   when (fexists || dexists) $
@@ -314,7 +353,7 @@ extract path overwrite = do
 
   extract' typs (FileName path,return ())
 
-  where (basename, typs) = findExtractors [] path
+  where (basename, typs) = findExtractors [] rpath
 
         -- The variations of extract' receive a list of archive types yet to
         -- be "unwrapped" from the previous extraction, plus a cleanup action
@@ -395,8 +434,10 @@ extractByTemp :: B.ByteString   -- output to write to temp
                  -> IO ExtractionResult
 extractByTemp ds fn = do
   (path, handle) <- openBinaryTempFile "." "file.ar"
-  -- DEBUG:
-  -- putStrLn $ "> " ++ path
+
+  loud <- isLoud
+  when loud $ putStrLn $ "> " ++ path
+
   B.hPut handle ds
   hFlush handle
   -- unzip does not support reading from standard input, so we must write the
@@ -425,9 +466,9 @@ bReadProcessWithExitCode
     -> IO (ExitCode,B.ByteString,String) -- ^ exitcode, stdout, stderr
 bReadProcessWithExitCode cmd args input = do
     (Just inh, Just outh, Just errh, pid) <-
-        createProcess (proc cmd args){ std_in  = CreatePipe,
-                                       std_out = CreatePipe,
-                                       std_err = CreatePipe }
+        createProcess (proc cmd args){ std_in  = CreatePipe
+                                     , std_out = CreatePipe
+                                     , std_err = CreatePipe }
 
     outMVar <- newEmptyMVar
 
@@ -440,12 +481,13 @@ bReadProcessWithExitCode cmd args input = do
     _ <- forkIO $ C.evaluate (length err) >> putMVar outMVar ()
 
     -- now write and flush any input
-    unless (B.null input) $ do B.hPutStr inh input; hFlush inh
-    -- DEBUG:
-    -- if B.null input
-    --   then putStrLn $ cmd ++ " " ++ unwords args
-    --   else do putStrLn $ "| " ++ cmd ++ " " ++ unwords args
-    --           B.hPutStr inh input; hFlush inh
+    loud <- isLoud
+    if loud
+      then if B.null input
+           then putStrLn $ cmd ++ " " ++ unwords args
+           else do putStrLn $ "| " ++ cmd ++ " " ++ unwords args
+                   B.hPutStr inh input; hFlush inh
+      else unless (B.null input) $ do B.hPutStr inh input; hFlush inh
     hClose inh -- done with stdin
 
     -- wait on the output
