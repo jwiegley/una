@@ -58,6 +58,7 @@ data Una = Una
     , temp      :: FilePath
     , output    :: FilePath
     , sys_temp  :: Bool
+    , test      :: Bool
     , files     :: [FilePath]
     }
     deriving (Data, Typeable, Show, Eq)
@@ -71,6 +72,8 @@ una = mode $ Una
                   text "Unarchive to DIR instead of the current directory"
     , sys_temp  = def &= flag "T" & 
                   text "Use the system's temp directory (typically /tmp)"
+    , test      = def &= explicit & flag "test" &
+                  text "Extract, throw away resulting file(s), set error code"
     , files     = def &= args & typ "FILE..."
     } &=
     prog "una" &
@@ -91,7 +94,15 @@ main = do
   forM_ (files opts) $ \path -> do
     result <- withStore "main" $ do putValue "main" "opts" opts
                                     extract path (force opts)
-    case result of
+    if test opts
+      then case result of
+      ArchiveError err -> exitWith $ ExitFailure 1
+      FileName fp      -> if fp /= path
+                          then removeFilePath fp
+                          else exitWith $ ExitFailure 1
+      DirectoryName dp -> removeFilePath dp
+
+      else case result of
       ArchiveError err -> error err
       FileName fp      -> if fp /= path
                           then success path fp "file" (delete_ opts)
@@ -493,6 +504,15 @@ workingDirectory = do
             if null dir
               then return "."
               else return dir
+
+removeFilePath :: FilePath -> IO ()
+removeFilePath path = do
+  fexists <- doesFileExist path
+  dexists <- doesDirectoryExist path
+  when (fexists || dexists) $
+    if fexists
+    then removeFile path
+    else removeDirectoryRecursive path
 
 -- The following function was copied from System.Process, because I needed a
 -- variant which operates on lazy ByteStrings.  The regular version attempts
