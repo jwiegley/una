@@ -109,8 +109,8 @@ main = do
                           else putStrLn $ "Archive unrecognized: " ++ fp
       DirectoryName dp -> success path dp "directory" (delete_ opts)
                              
-  -- In case of success, print the final product's path if -v was used; and
-  -- delete the original archive if -d was used.  Otherwise, this is a no-op.
+  -- In case of success, print the final product's path and delete the
+  -- original archive if -d was used.
   where success path f kind delete = do 
           rf <- makeRelativeToCurrentDirectory f
           putStrLn $ "Extracted " ++ kind ++ ": " ++ rf
