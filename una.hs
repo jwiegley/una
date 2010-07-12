@@ -222,14 +222,14 @@ p7zipExtractor = Extractor $ \item -> do
 
 zipExtractor = Extractor $ fix $ \fn item ->
   case item of
-    DataStream d -> extractByTemp d fn
+    DataStream d -> extractByTemp d ".zip" fn
     FileName f   -> do
       dir <- createTempDirectory
       performExtract "unzip" ["-q", "-d", dir, f] B.empty (returnContents dir)
 
 cabExtractor = Extractor $ fix $ \fn item ->
   case item of
-    DataStream d -> extractByTemp d fn
+    DataStream d -> extractByTemp d ".cab" fn
     FileName f   -> do
       dir <- createTempDirectory
       performExtract "cabextract" ["-q", "-d", dir, f] B.empty
@@ -257,17 +257,17 @@ cpioExtractor = Extractor $ fix $ \fn item ->
 -- to a specified directory.  This is why I call them the "dumb" extractors.
 -- Everything must be setup for them in advance.
 
-dumbExtractor :: String -> String -> Extraction -> IO ExtractionResult
-dumbExtractor cmd arg item =
+dumbExtractor :: String -> String -> String -> Extraction -> IO ExtractionResult
+dumbExtractor cmd arg ext item =
   case item of
-    DataStream d -> extractByTemp d (dumbExtractor cmd arg)
+    DataStream d -> extractByTemp d ext (dumbExtractor cmd ext arg)
     FileName f   -> extractInTempDir cmd [arg, f] B.empty
 
-arjExtractor      = Extractor $ dumbExtractor "unarj" "x"
-lhaExtractor      = Extractor $ dumbExtractor "lha" "x"
-rarExtractor      = Extractor $ dumbExtractor "unrar" "x"
-arExtractor       = Extractor $ dumbExtractor "ar" "x"
-shrinkItExtractor = Extractor $ dumbExtractor "nulib2" "-x"
+arjExtractor      = Extractor $ dumbExtractor "unarj" "x" ".arj"
+lhaExtractor      = Extractor $ dumbExtractor "lha" "x" ".lha"
+rarExtractor      = Extractor $ dumbExtractor "unrar" "x" ".rar"
+arExtractor       = Extractor $ dumbExtractor "ar" "x" ".ar"
+shrinkItExtractor = Extractor $ dumbExtractor "nulib2" "-x" ".shk"
 
 -- Disk images are mountable archives, which means the data must be copied out
 -- in order to "extract" it.  jww (2010-07-09): We should handle Linux
@@ -275,7 +275,7 @@ shrinkItExtractor = Extractor $ dumbExtractor "nulib2" "-x"
 
 diskImageExtractor = Extractor $ fix $ \fn item ->
   case item of
-    DataStream d -> extractByTemp d fn
+    DataStream d -> extractByTemp d ".dmg" fn
     FileName f   -> do
       let args = ["attach", "-readonly", "-mountrandom", "/tmp",
                   "-noverify", "-noautofsck", f]
@@ -311,7 +311,7 @@ diskImageExtractor = Extractor $ fix $ \fn item ->
 
 stuffItExtractor archivep = Extractor $ fix $ \fn item ->
   case item of
-    DataStream d -> extractByTemp d fn
+    DataStream d -> extractByTemp d ".sit" fn
     FileName f   -> do
       tmpDir <- createTempDirectory
       canonTmp <- canonicalizePath tmpDir
@@ -468,12 +468,13 @@ examineContents dir cleanup = do
 
 
 extractByTemp :: B.ByteString   -- output to write to temp
+                 -> String      -- the temporary file extension
                  -> (Extraction -> IO ExtractionResult)
                                 -- function to handle the new temp file
                  -> IO ExtractionResult
-extractByTemp ds fn = do
+extractByTemp ds ext fn = do
   dir <- workingDirectory
-  (path, handle) <- openBinaryTempFile dir "file.ar"
+  (path, handle) <- openBinaryTempFile dir ("file" ++ ext)
 
   loud <- isLoud
   when loud $ putStrLn $ "> " ++ path
