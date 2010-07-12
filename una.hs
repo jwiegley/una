@@ -475,10 +475,12 @@ bReadProcessWithExitCode cmd args input = do
     outMVar <- newEmptyMVar
 
     -- fork off a thread to start consuming stdout
+    hSetBinaryMode outh True
     out  <- B.hGetContents outh
     _ <- forkIO $ C.evaluate (B.length out) >> putMVar outMVar ()
 
     -- fork off a thread to start consuming stderr
+    hSetBinaryMode errh False
     err  <- hGetContents errh
     _ <- forkIO $ C.evaluate (length err) >> putMVar outMVar ()
 
