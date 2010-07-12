@@ -64,13 +64,15 @@ una = mode $ Una
     , files     = def &= args & typ "FILE..."
     } &=
     prog "una" &
-    text "Universal, recursive unarchiver/decoder/decompressor tool"
+    text "Universal recursive unarchiver/decoder/decompressor tool"
 
 
 main :: IO ()
 main = do
-  opts <- cmdArgs ("una v" ++ version 
-                   ++ ", (C) John Wiegley " ++ copyright) [una]
+  let progInfo = ("una v" ++ version ++ ", (C) John Wiegley " ++ copyright)
+  opts <- cmdArgs progInfo [una]
+  
+  when (null (files opts)) $ cmdArgsHelp progInfo [una] Text >>= putStr
 
   -- Extract each archive given on the command-line.  If it's not recognizable
   -- as an archive, the resulting pathname will be identical to the input, in
