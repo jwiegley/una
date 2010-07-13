@@ -183,13 +183,13 @@ simpleExtractor cmd args item =
     DataStream d -> performExtract cmd args d returnStream
     FileName f   -> performExtract cmd (args ++ [f]) B.empty returnStream
     
-gzipExtractor     = Extractor $ simpleExtractor "gzip" ["-qdc"]
+gzipExtractor     = Extractor False $ simpleExtractor "gzip" ["-qdc"]
 compressExtractor = gzipExtractor
-bzip2Extractor    = Extractor $ simpleExtractor "bzip2" ["-qdc"]
-xzipExtractor     = Extractor $ simpleExtractor "xz" ["-qdc"]
+bzip2Extractor    = Extractor False $ simpleExtractor "bzip2" ["-qdc"]
+xzipExtractor     = Extractor False $ simpleExtractor "xz" ["-qdc"]
 
-uuExtractor       = Extractor $ simpleExtractor "uudecode" []
-gpgExtractor      = Extractor $ simpleExtractor "gpg" ["-d"]
+uuExtractor       = Extractor False $ simpleExtractor "uudecode" []
+gpgExtractor      = Extractor False $ simpleExtractor "gpg" ["-d"]
 
 -- Tarballs and 7-zip are both archive formats that can accept their input on
 -- stdin.  It's not likely that someone will compress a 7zip archive, but it's
@@ -198,7 +198,7 @@ gpgExtractor      = Extractor $ simpleExtractor "gpg" ["-d"]
 returnContents :: FilePath -> B.ByteString -> IO ExtractionResult
 returnContents dir _ = examineContents dir True
 
-tarballExtractor = Extractor $ \item -> do
+tarballExtractor = Extractor True $ \item -> do
   dir <- createTempDirectory
   case item of
     DataStream d ->
@@ -206,7 +206,7 @@ tarballExtractor = Extractor $ \item -> do
     FileName f   ->
       performExtract "tar" ["xCf", dir, f] B.empty (returnContents dir)
 
-p7zipExtractor = Extractor $ \item -> do
+p7zipExtractor = Extractor True $ \item -> do
   dir <- createTempDirectory
   case item of
     DataStream d ->
@@ -220,14 +220,14 @@ p7zipExtractor = Extractor $ \item -> do
 -- accept the archive via stdin.  If there is a stream from an earlier
 -- decoding, it must be written to a temp file and then extracted from that.
 
-zipExtractor = Extractor $ fix $ \fn item ->
+zipExtractor = Extractor True $ fix $ \fn item ->
   case item of
     DataStream d -> extractByTemp d ".zip" fn
     FileName f   -> do
       dir <- createTempDirectory
       performExtract "unzip" ["-q", "-d", dir, f] B.empty (returnContents dir)
 
-cabExtractor = Extractor $ fix $ \fn item ->
+cabExtractor = Extractor True $ fix $ \fn item ->
   case item of
     DataStream d -> extractByTemp d ".cab" fn
     FileName f   -> do
@@ -248,7 +248,7 @@ extractInTempDir cmd args inp = do
             (\_ -> setCurrentDirectory ccwd)
             (\_ -> performExtract cmd args inp (returnContents cdir))
 
-cpioExtractor = Extractor $ fix $ \fn item ->
+cpioExtractor = Extractor True $ fix $ \fn item ->
   case item of
     DataStream d -> extractInTempDir "cpio" ["-id"] d
     FileName f   -> extractInTempDir "cpio" ["-idF", f] B.empty
@@ -263,17 +263,17 @@ dumbExtractor cmd arg ext item =
     DataStream d -> extractByTemp d ext (dumbExtractor cmd ext arg)
     FileName f   -> extractInTempDir cmd [arg, f] B.empty
 
-arjExtractor      = Extractor $ dumbExtractor "unarj" "x" ".arj"
-lhaExtractor      = Extractor $ dumbExtractor "lha" "x" ".lha"
-rarExtractor      = Extractor $ dumbExtractor "unrar" "x" ".rar"
-arExtractor       = Extractor $ dumbExtractor "ar" "x" ".ar"
-shrinkItExtractor = Extractor $ dumbExtractor "nulib2" "-x" ".shk"
+arjExtractor      = Extractor True $ dumbExtractor "unarj" "x" ".arj"
+lhaExtractor      = Extractor True $ dumbExtractor "lha" "x" ".lha"
+rarExtractor      = Extractor True $ dumbExtractor "unrar" "x" ".rar"
+arExtractor       = Extractor True $ dumbExtractor "ar" "x" ".ar"
+shrinkItExtractor = Extractor True $ dumbExtractor "nulib2" "-x" ".shk"
 
 -- Disk images are mountable archives, which means the data must be copied out
 -- in order to "extract" it.  jww (2010-07-09): We should handle Linux
 -- loopbook mounts too.
 
-diskImageExtractor = Extractor $ fix $ \fn item ->
+diskImageExtractor = Extractor True $ fix $ \fn item ->
   case item of
     DataStream d -> extractByTemp d ".dmg" fn
     FileName f   -> do
@@ -309,7 +309,7 @@ diskImageExtractor = Extractor $ fix $ \fn item ->
 -- StuffIt Expander is its own creature.  We talk to it via Applescript, as I
 -- know of no better way.
 
-stuffItExtractor archivep = Extractor $ fix $ \fn item ->
+stuffItExtractor archivep = Extractor archivep $ fix $ \fn item ->
   case item of
     DataStream d -> extractByTemp d ".sit" fn
     FileName f   -> do
@@ -344,7 +344,8 @@ stuffItExtractor archivep = Extractor $ fix $ \fn item ->
 
 -- Types used by this script.
 
-data Extractor = Extractor { extractor :: Extraction -> IO ExtractionResult }
+data Extractor = Extractor { isArchive :: Bool
+                           , extractor :: Extraction -> IO ExtractionResult }
 
 data Extraction = DataStream B.ByteString
                 | FileName FilePath
@@ -420,9 +421,15 @@ extract rpath overwrite = do
           renameDirectory f destination
           m; return $ DirectoryName destination
 
-        extract' (t:ts) (x,m) = do y <- extractor t x
-                                   result <- extract' ts y
-                                   m; return result
+        extract' (t:ts) (x,m) = do 
+          y <- extractor t x
+          -- If t is an archive extractor, we'll let examineContents decide if
+          -- it contains items needing further extraction.  Otherwise, if
+          -- there are successive compression or encoding stages, process them
+          -- now recursively.
+          let ts' = if isArchive t then [] else ts
+          result <- extract' ts' y
+          m; return result
 
 
 findExtractors :: [Extractor] -> FilePath -> (FilePath, [Extractor])
