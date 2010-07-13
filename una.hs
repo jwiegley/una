@@ -400,23 +400,25 @@ extract rpath overwrite = do
 
         extract' _  (x@(ArchiveError _),m) = do m; return x
 
-        extract' [] (x@(DataStream d),m) = do
+        extract' [] (DataStream d,m) = do
           -- If we reach the final step of the unarchiving process, and
-          -- the result is a data stream, write it to disk at the
-          -- desired basename.
+          -- the result is a data stream, write it to disk at the desired
+          -- basename.
           destination <- getDestination
           B.writeFile destination d
-          m; return (FileName destination)
+          m; return $ FileName destination
 
-        extract' [] (x@(FileName f),m) = do
+        extract' [] (FileName f,m) = do
           destination <- getDestination
-          renameFile f destination
-          m; return (FileName destination)
+          -- Don't rename the file
+          let realdest = dropFileName destination </> takeFileName f
+          renameFile f realdest
+          m; return $ FileName realdest
 
-        extract' [] (x@(DirectoryName f),m) = do
+        extract' [] (DirectoryName f,m) = do
           destination <- getDestination
           renameDirectory f destination
-          m; return (DirectoryName destination)
+          m; return $ DirectoryName destination
 
         extract' (t:ts) (x,m) = do y <- extractor t x
                                    result <- extract' ts y
