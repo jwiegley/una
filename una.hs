@@ -69,7 +69,7 @@ una = mode $ Una
     , temp      = def &= typDir & 
                   text "Use DIR as a temp directory, instead of current"
     , output    = def &= typDir & flag "o" & 
-                  text "Unarchive to DIR instead of the current directory"
+                  text "Unarchive to DIR instead of archive's directory"
     , sys_temp  = def &= flag "T" & 
                   text "Use the system's temp directory (typically /tmp)"
     , test      = def &= explicit & flag "test" &
