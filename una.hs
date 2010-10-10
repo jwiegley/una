@@ -146,7 +146,7 @@ exts = [ (".tar",          [tarballExtractor])
        , (".lzh",          [lhaExtractor])
        , (".rar",          [rarExtractor])
        , (".uu",           [uuExtractor])
-       , (".ar",           [arExtractor])
+       , (".a",            [arExtractor])
        , (".cab",          [cabExtractor])
        , (".cpio",         [cpioExtractor])
 
