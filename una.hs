@@ -20,6 +20,7 @@ module Main where
 import Data.Char
 import Data.List
 import Data.Function
+import Data.Maybe
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as Char8
 import System.Environment
@@ -31,7 +32,7 @@ import System.IO
 import System.IO.Storage
 import System.Exit
 import Control.Monad
-import Control.Concurrent.MonadIO
+import Control.Concurrent
 import qualified Control.Exception as C
 
 -- This script takes a series of pathnames to compressed files and/or
@@ -49,8 +50,9 @@ import qualified Control.Exception as C
 --   3. If the archive contains multiple items, they are unarchived in a
 --      directory named after the original file.
 
-version   = "2.0.0"
-copyright = "2009-2010"
+version    = "2.0.0"
+copyright  = "2009-2010"
+unaSummary = "una v" ++ version ++ ", (C) John Wiegley " ++ copyright
 
 data Una = Una
     { delete_   :: Bool
@@ -63,29 +65,29 @@ data Una = Una
     }
     deriving (Data, Typeable, Show, Eq)
 
-una = mode $ Una
-    { delete_   = def &= text "Delete the original archive if successful"
-    , force     = def &= flag "f" & text "Overwrite any existing file/dir"
-    , temp      = def &= typDir & 
-                  text "Use DIR as a temp directory, instead of current"
-    , output    = def &= typDir & flag "o" & 
-                  text "Unarchive to DIR instead of archive's directory"
-    , sys_temp  = def &= flag "T" & 
-                  text "Use the system's temp directory (typically /tmp)"
-    , test      = def &= explicit & flag "test" &
-                  text "Extract, throw away resulting file(s), set error code"
-    , files     = def &= args & typ "FILE..."
+una = Una
+    { delete_   = def &= help "Delete the original archive if successful"
+    , force     = def &= name "f" &= help "Overwrite any existing file/dir"
+    , temp      = def &= typDir &=
+                  help "Use DIR as a temp directory, instead of current"
+    , output    = def &= typDir &= name "o" &=
+                  help "Unarchive to DIR instead of archive's directory"
+    , sys_temp  = def &= name "T" &=
+                  help "Use the system's temp directory (typically /tmp)"
+    , test      = def &= explicit &= name "test" &=
+                  help "Extract, throw away resulting file(s), set error code"
+    , files     = def &= args &= typ "FILE..."
     } &=
-    prog "una" &
-    text "Universal recursive unarchiver/decoder/decompressor tool"
+    summary unaSummary &=
+    program "una" &=
+    help "Universal recursive unarchiver/decoder/decompressor tool"
 
 
 main :: IO ()
 main = do
-  let progInfo = ("una v" ++ version ++ ", (C) John Wiegley " ++ copyright)
-  opts <- cmdArgs progInfo [una]
-  
-  when (null (files opts)) $ cmdArgsHelp progInfo [una] Text >>= putStr
+  opts <- cmdArgs una
+
+  --when (null (files opts)) $ cmdArgsApply cmdArgsHelp
 
   -- Extract each archive given on the command-line.  If it's not recognizable
   -- as an archive, the resulting pathname will be identical to the input, in
@@ -108,10 +110,10 @@ main = do
                           then success path fp "file" (delete_ opts)
                           else putStrLn $ "Archive unrecognized: " ++ fp
       DirectoryName dp -> success path dp "directory" (delete_ opts)
-                             
+
   -- In case of success, print the final product's path and delete the
   -- original archive if -d was used.
-  where success path f kind delete = do 
+  where success path f kind delete = do
           rf <- makeRelativeToCurrentDirectory f
           putStrLn $ "Extracted " ++ kind ++ ": " ++ rf
           when delete $ removeFile path
@@ -182,7 +184,7 @@ simpleExtractor cmd args item =
   case item of
     DataStream d -> performExtract cmd args d returnStream
     FileName f   -> performExtract cmd (args ++ [f]) B.empty returnStream
-    
+
 gzipExtractor     = Extractor False $ simpleExtractor "gzip" ["-qdc"]
 compressExtractor = gzipExtractor
 bzip2Extractor    = Extractor False $ simpleExtractor "bzip2" ["-qdc"]
@@ -215,7 +217,7 @@ p7zipExtractor = Extractor True $ \item -> do
     FileName f   ->
       performExtract "7za" ["x", f, "-bd", "-o" ++ dir] B.empty
                      (returnContents dir)
-                     
+
 -- Zip and CAB are not quite as flexible as tar and 7-zip, in that they cannot
 -- accept the archive via stdin.  If there is a stream from an earlier
 -- decoding, it must be written to a temp file and then extracted from that.
@@ -234,7 +236,7 @@ cabExtractor = Extractor True $ fix $ \fn item ->
       dir <- createTempDirectory
       performExtract "cabextract" ["-q", "-d", dir, f] B.empty
                      (returnContents dir)
-                     
+
 -- cpio doesn't know how to extract its contents to a particular directory, so
 -- a temporary must be created.  It can, however, read input from stream.
 
@@ -298,14 +300,14 @@ diskImageExtractor = Extractor True $ fix $ \fn item ->
                                noCleanup)
             Just dir -> do
               tmpDir <- createTempDirectory
-              when loud $ 
+              when loud $
                 putStrLn $ "! ditto " ++ unwords [dir, tmpDir]
               readProcessWithExitCode "ditto" [dir, tmpDir] []
-              when loud $ 
+              when loud $
                 putStrLn $ "! hdiutil " ++ unwords ["detach", dir, "-force"]
               readProcessWithExitCode "hdiutil" ["detach", dir, "-force"] []
               examineContents tmpDir True
-              
+
 -- StuffIt Expander is its own creature.  We talk to it via Applescript, as I
 -- know of no better way.
 
@@ -369,7 +371,7 @@ extract rpath overwrite = do
   path    <- canonicalizePath rpath
   pexists <- doesFileExist path
   unless pexists $ error $ "File does not exist: " ++ path
-  
+
   destination <- getDestination
 
   fexists <- doesFileExist destination
@@ -385,13 +387,13 @@ extract rpath overwrite = do
   extract' typs (FileName path,return ())
 
   where (basename, typs) = findExtractors [] rpath
-        
-        getDestination = do 
+
+        getDestination = do
           destpath <- getOption output
           return $ if null destpath
-                   then basename
+                   then getCurrentDirectory
                    else destpath </> takeFileName basename
-        
+
         -- The variations of extract' receive a list of archive types yet to
         -- be "unwrapped" from the previous extraction, plus a cleanup action
         -- which must be executed before the final result is returned.  The
@@ -421,7 +423,7 @@ extract rpath overwrite = do
           renameDirectory f destination
           m; return $ DirectoryName destination
 
-        extract' (t:ts) (x,m) = do 
+        extract' (t:ts) (x,m) = do
           y <- extractor t x
           -- If t is an archive extractor, we'll let examineContents decide if
           -- it contains items needing further extraction.  Otherwise, if
@@ -539,13 +541,13 @@ bReadProcessWithExitCode cmd args input = do
 
     -- fork off a thread to start consuming stdout
     hSetBinaryMode outh True
-    out  <- B.hGetContents outh
-    _ <- forkIO $ C.evaluate (B.length out) >> putMVar outMVar ()
+    out <- B.hGetContents outh
+    _   <- forkIO $ C.evaluate (B.length out) >> putMVar outMVar ()
 
     -- fork off a thread to start consuming stderr
     hSetBinaryMode errh False
-    err  <- hGetContents errh
-    _ <- forkIO $ C.evaluate (length err) >> putMVar outMVar ()
+    err <- hGetContents errh
+    _   <- forkIO $ C.evaluate (length err) >> putMVar outMVar ()
 
     -- now write and flush any input
     loud <- isLoud
