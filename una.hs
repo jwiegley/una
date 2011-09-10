@@ -441,11 +441,11 @@ findExtractors acc f = apply $ lookup (map toLower (takeExtension f)) exts
         apply Nothing      = (f, acc)
 
 
-performExtract :: String        -- command to execute
-                  -> [String]   -- command arguments
+performExtract :: String          -- command to execute
+                  -> [String]     -- command arguments
                   -> B.ByteString -- standard input
                   -> (B.ByteString -> IO ExtractionResult)
-                                -- function to process output
+                                  -- function to process output
                   -> IO ExtractionResult
 performExtract cmd args ds fn = do
   (exit, out, err) <- bReadProcessWithExitCode cmd args ds
