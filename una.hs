@@ -390,8 +390,9 @@ extract rpath overwrite = do
 
         getDestination = do
           destpath <- getOption output
+          cwd <- getCurrentDirectory
           return $ if null destpath
-                   then getCurrentDirectory
+                   then cwd
                    else destpath </> takeFileName basename
 
         -- The variations of extract' receive a list of archive types yet to
