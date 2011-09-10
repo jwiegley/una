@@ -136,6 +136,7 @@ exts = [ (".tar",          [tarballExtractor])
        , (".tbz",          [bzip2Extractor, tarballExtractor])
        , (".tz2",          [bzip2Extractor, tarballExtractor])
        , (".txz",          [xzipExtractor, tarballExtractor])
+       , (".shar",         [sharExtractor])
        , (".z",            [compressExtractor])
        , (".gz",           [gzipExtractor])
        , (".bz2",          [bzip2Extractor])
@@ -207,6 +208,14 @@ tarballExtractor = Extractor True $ \item -> do
       performExtract "tar" ["xCf", dir, "-"] d (returnContents dir)
     FileName f   ->
       performExtract "tar" ["xCf", dir, f] B.empty (returnContents dir)
+
+sharExtractor = Extractor True $ \item -> do
+  dir <- createTempDirectory
+  case item of
+    DataStream d ->
+      performExtract "unshar" ["-d", dir] d (returnContents dir)
+    FileName f   ->
+      performExtract "unshar" ["-d", dir, f] B.empty (returnContents dir)
 
 p7zipExtractor = Extractor True $ \item -> do
   dir <- createTempDirectory
