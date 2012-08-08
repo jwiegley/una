@@ -51,7 +51,7 @@ import qualified Control.Exception as C
 --      directory named after the original file.
 
 version    = "2.0.0"
-copyright  = "2009-2010"
+copyright  = "2009-2012"
 unaSummary = "una v" ++ version ++ ", (C) John Wiegley " ++ copyright
 
 data Una = Una
@@ -80,6 +80,7 @@ una = Una
     } &=
     summary unaSummary &=
     program "una" &=
+    helpArg [explicit, name "h"] &=
     help "Universal recursive unarchiver/decoder/decompressor tool"
 
 
@@ -98,18 +99,18 @@ main = do
                                     extract path (force opts)
     if test opts
       then case result of
-      ArchiveError err -> exitWith $ ExitFailure 1
-      FileName fp      -> if fp /= path
-                          then removeFilePath fp
-                          else exitWith $ ExitFailure 1
-      DirectoryName dp -> removeFilePath dp
+        ArchiveError err -> exitWith $ ExitFailure 1
+        FileName fp      -> if fp /= path
+                            then removeFilePath fp
+                            else exitWith $ ExitFailure 1
+        DirectoryName dp -> removeFilePath dp
 
       else case result of
-      ArchiveError err -> error err
-      FileName fp      -> if fp /= path
-                          then success path fp "file" (delete_ opts)
-                          else putStrLn $ "Archive unrecognized: " ++ fp
-      DirectoryName dp -> success path dp "directory" (delete_ opts)
+        ArchiveError err -> error err
+        FileName fp      -> if fp /= path
+                            then success path fp "file" (delete_ opts)
+                            else putStrLn $ "Archive unrecognized: " ++ fp
+        DirectoryName dp -> success path dp "directory" (delete_ opts)
 
   -- In case of success, print the final product's path and delete the
   -- original archive if -d was used.
