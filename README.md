@@ -1,4 +1,4 @@
-una: Universal un-archiver (mainly tested on Mac OS X for now)
+# una: Universal un-archiver
 
 Version 1.0, by John Wiegley <johnw@newartisans.com>
 
@@ -7,20 +7,21 @@ remember all the extraction options for the large number of archive formats I
 deal with.
 
 Optional dependencies:
-  StuffIt Expander (free, expander-only version)
-  MacPorts: unarj, unrar, lha, p7zip, cabextract
 
-.h2 Usage
+- StuffIt Expander (free, expander-only version)
+- MacPorts: unarj, unrar, lha, p7zip, cabextract
 
-una [OPTION] ARCHIVE...
+## Usage
 
-If no OPTION is specified, the default action is to extract the archive's
-contents into the current directory.
+    una [OPTION] ARCHIVE...
 
-Options:
-  -h, --help        show help
-  -d, --delete      delete the archive if sucessfully extracted
-  -f, --overwrite   overwrite any existing file
+    If no OPTION is specified, the default action is to extract the archive's
+    contents into the current directory.
+
+    Options:
+      -h, --help        show help
+      -d, --delete      delete the archive if sucessfully extracted
+      -f, --overwrite   overwrite any existing file
 
 This script is also smart about unarchiving:
 
