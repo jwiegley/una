@@ -59,24 +59,24 @@ data Una = Una
     , force     :: Bool
     , temp      :: FilePath
     , output    :: FilePath
-    , sys_temp  :: Bool
+    , sysTemp   :: Bool
     , test      :: Bool
     , files     :: [FilePath]
     }
     deriving (Data, Typeable, Show, Eq)
 
 una = Una
-    { delete_   = def &= help "Delete the original archive if successful"
-    , force     = def &= name "f" &= help "Overwrite any existing file/dir"
-    , temp      = def &= typDir &=
-                  help "Use DIR as a temp directory, instead of current"
-    , output    = def &= typDir &= name "o" &=
-                  help "Unarchive to DIR instead of archive's directory"
-    , sys_temp  = def &= name "T" &=
-                  help "Use the system's temp directory (typically /tmp)"
-    , test      = def &= explicit &= name "test" &=
-                  help "Extract, throw away resulting file(s), set error code"
-    , files     = def &= args &= typ "FILE..."
+    { delete_ = def &= help "Delete the original archive if successful"
+    , force   = def &= name "f" &= help "Overwrite any existing file/dir"
+    , temp    = def &= typDir &=
+                help "Use DIR as a temp directory, instead of current"
+    , output  = def &= typDir &= name "o" &=
+                help "Unarchive to DIR instead of archive's directory"
+    , sysTemp = def &= name "T" &=
+                help "Use the system's temp directory (typically /tmp)"
+    , test    = def &= explicit &= name "test" &=
+                help "Extract, throw away resulting file(s), set error code"
+    , files   = def &= args &= typ "FILE..."
     } &=
     summary unaSummary &=
     program "una" &=
@@ -516,7 +516,7 @@ createTempDirectory = do
 
 workingDirectory :: IO FilePath
 workingDirectory = do
-  sysp <- getOption sys_temp
+  sysp <- getOption sysTemp
   if sysp
     then getTemporaryDirectory
     else do dir <- getOption temp
