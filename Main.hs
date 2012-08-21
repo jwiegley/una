@@ -50,7 +50,7 @@ import qualified Control.Exception as C
 --   3. If the archive contains multiple items, they are unarchived in a
 --      directory named after the original file.
 
-version    = "2.0.0"
+version    = "2.0.1"
 copyright  = "2009-2012"
 unaSummary = "una v" ++ version ++ ", (C) John Wiegley " ++ copyright
 
@@ -80,13 +80,13 @@ una = Una
     } &=
     summary unaSummary &=
     program "una" &=
-    helpArg [explicit, name "h"] &=
     help "Universal recursive unarchiver/decoder/decompressor tool"
 
 
 main :: IO ()
 main = do
-  opts <- cmdArgs una
+  mainArgs <- getArgs
+  opts <- (if null mainArgs then withArgs ["--help"] else id) (cmdArgs una)
 
   --when (null (files opts)) $ cmdArgsApply cmdArgsHelp
 
