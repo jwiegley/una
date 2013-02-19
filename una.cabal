@@ -14,7 +14,7 @@ License:            BSD3
 License-file:       LICENSE
 Author:             John Wiegley
 Maintainer:         John Wiegley <johnw@newartisans.com>
-Category:           Utilities
+Category:           Utils
 Build-type:         Simple
 Cabal-version:      >= 1.8
 
