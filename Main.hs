@@ -204,7 +204,7 @@ simpleExtractor cmd args item =
     FileName f   -> performExtract cmd (args ++ [f]) B.empty returnStream
 
 bestExe :: [String] -> IO String
-bestExe xs = fromJust <$> msum <$> traverse findExecutable xs
+bestExe xs = fromJust . msum <$> traverse findExecutable xs
 
 gzipExtractor     = Extractor False $ \x -> do
                       exePath <- bestExe ["pigz", "gzip"]
@@ -444,7 +444,7 @@ extract rpath overwrite = do
                 else destpath) </> takeFileName basename
 
     wrap :: IO () -> IO Extraction -> IO Extraction
-    wrap m io = C.bracket (return ()) (const m) (const io)
+    wrap = C.bracket_ (return ())
 
     extract' :: [Extractor] -> (Extraction, IO ()) -> IO Extraction
 
@@ -518,8 +518,7 @@ examineContents dir cleanup = do
   contents <- getDirectoryContents canon
   case delete "." $ delete ".." contents of
     [] -> return (ArchiveError "Empty archive", removeDirectoryRecursive canon)
-
-    (x:[]) -> do
+    [x] -> do
       let path = canon </> x
       isDir <- doesDirectoryExist path
       if isDir
