@@ -1,5 +1,4 @@
 { compiler    ? "ghc822" # "ghc842" also works
-, doProfiling ? false
 , doBenchmark ? false
 , doTracing   ? false
 , doStrict    ? false
@@ -24,9 +23,6 @@ in haskellPackages.developPackage {
   };
 
   modifier = drv: pkgs.haskell.lib.overrideCabal drv (attrs: {
-    enableLibraryProfiling    = doProfiling;
-    enableExecutableProfiling = doProfiling;
-
     inherit doBenchmark;
   });
 
