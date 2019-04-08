@@ -10,7 +10,8 @@ env:
   matrix:
     - GHCVERSION=ghc802
     - GHCVERSION=ghc822
-    - GHCVERSION=ghc843
+    - GHCVERSION=ghc844
+    - GHCVERSION=ghc863
 
 matrix:
   allow_failures:
