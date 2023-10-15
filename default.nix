@@ -1,9 +1,9 @@
-{ compiler    ? "ghc863"
+{ compiler    ? "ghc8106"
 , doBenchmark ? false
 , doTracing   ? false
 , doStrict    ? false
-, rev         ? "a3b6b49eac91baa25a01ef10b74a7aeb89a963a1"
-, sha256      ? "1za2mvmc9nlxb91syd608fjrkm53rm658nflracy1js1a3nlaj06"
+, rev         ? "24c765c744ba856700db92ab94ef9c695d73f95f"
+, sha256      ? "0ak482k4jsnnmipmc038fla5ywr9h01xs91sjkx35wkkxcs2lc23"
 , pkgs        ? import (builtins.fetchTarball {
     url = "https://github.com/NixOS/nixpkgs/archive/${rev}.tar.gz";
     inherit sha256; }) {
@@ -22,7 +22,8 @@ in haskellPackages.developPackage {
   source-overrides = {
   };
 
-  modifier = drv: pkgs.haskell.lib.overrideCabal drv (attrs: {
+  modifier = drv: pkgs.haskell.lib.overrideCabal
+    (pkgs.haskell.lib.justStaticExecutables drv) (attrs: {
     inherit doBenchmark;
   });
 
