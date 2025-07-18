@@ -36,7 +36,7 @@
       ];
     in {
       packages.default = flake.packages."una:exe:una";
-      devShell = flake.devShell // {
+      devShells.default = flake.devShells.default // {
         withHoogle = true;
       };
     });
