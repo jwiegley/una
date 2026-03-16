@@ -1,0 +1,4 @@
+- ignore: {name: "Use camelCase"}
+- ignore: {name: "Use lambda-case"}
+- error: {lhs: "Data.Maybe.fromJust x", rhs: "error \"use pattern matching instead of fromJust\"", name: "No fromJust"}
+- error: {lhs: "head x", rhs: "error \"use pattern matching instead of head\"", name: "No head"}

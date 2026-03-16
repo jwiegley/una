@@ -1,32 +1,37 @@
-Name: una
+cabal-version:   2.4
+name:            una
+version:         2.1.0
+synopsis:        Universal un-archiver utility
+description:
+  A simple universal unarchiving utility.  Just point it at any archive or
+  compressed file, and it spits out a single file or directory in the current
+  directory with its contents.  Use -d to delete the original archive on
+  success.  Use -f to overwrite any existing file or directory which might
+  be in the way.
 
-Version:  2.1.0
-Synopsis: Universal un-archiver utility
+homepage:        https://github.com/jwiegley/una
+license:         BSD-3-Clause
+license-file:    LICENSE.md
+author:          John Wiegley
+maintainer:      John Wiegley <johnw@newartisans.com>
+category:        Utils
+build-type:      Simple
+extra-doc-files: README.md
 
-Description: A simple universal unarchiving utility.  Just point it at any
-             archive or compressed file, and it spits out a single file or
-             directory in the current directory with its contents.  Use -d to
-             delete the original archive on success.  Use -f to overwrite any
-             existing file or directory which might be in the way.
+executable una
+  main-is:       Main.hs
+  ghc-options:   -threaded -Wall -Wno-name-shadowing -Wno-missing-signatures
+  build-depends:
+    , base        >=4 && <5
+    , bytestring
+    , cmdargs
+    , directory
+    , filepath
+    , io-storage
+    , process
 
-Homepage:           https://github.com/jwiegley/una
-License:            BSD3
-License-file:       LICENSE
-Author:             John Wiegley
-Maintainer:         John Wiegley <johnw@newartisans.com>
-Category:           Utils
-Build-type:         Simple
-Cabal-version:      >= 1.8
+  default-language: Haskell2010
 
-Extra-Source-Files: README.md
-
-Executable una
-    Main-is: Main.hs
-    Ghc-options: -threaded
-
-    Build-depends: base >= 4 && < 5, cmdargs, io-storage, directory, process,
-                   filepath, bytestring
-
-Source-repository head
+source-repository head
   type:     git
   location: https://github.com/jwiegley/una

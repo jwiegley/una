@@ -1,6 +1,10 @@
 /una
 /una.hi
 /dist/
+/dist-newstyle/
 /Main.hi
 /Main
+/Main.o
 /Main.eventlog
+/result
+/.envrc.cache
