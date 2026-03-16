@@ -1,0 +1,12 @@
+pre-commit:
+  parallel: true
+  commands:
+    fourmolu-check:
+      glob: "*.hs"
+      run: nix develop --command fourmolu --mode check {staged_files}
+    hlint:
+      glob: "*.hs"
+      run: nix develop --command hlint {staged_files}
+    nix-check:
+      glob: "*.{hs,nix,cabal,yaml}"
+      run: nix flake check --no-warn-dirty 2>&1
